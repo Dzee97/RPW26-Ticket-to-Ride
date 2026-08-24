@@ -1,0 +1,18 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Network builder cache and non-web generated outputs.
+# web_network.geojson and game_edges.geojson are intentionally NOT ignored:
+# commit those two files so GitHub Pages can serve them.
+data/raw/
+data/bus_network.geojson
+data/stops.csv
+data/line_stops.csv
+data/stop_merge_report.csv

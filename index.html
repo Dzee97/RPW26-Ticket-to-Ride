@@ -1,0 +1,1915 @@
+<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f6f7f8">
+  <title>Public Transport Game</title>
+
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+  >
+
+  <style>
+    :root {
+      --bg: #f5f6f7;
+      --surface: #ffffff;
+      --surface-2: #eef1f3;
+      --text: #1d252c;
+      --muted: #66717a;
+      --border: #dfe4e7;
+      --accent: #173f5f;
+      --accent-soft: #e4edf4;
+      --gold: #a96f00;
+      --gold-soft: #fff3c7;
+      --danger: #b42318;
+      --shadow: 0 8px 24px rgba(22, 31, 38, .10);
+      --topbar-h: 54px;
+      --nav-h: 68px;
+      --radius: 16px;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overscroll-behavior: none;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+        "Segoe UI", sans-serif;
+    }
+
+    body { overflow: hidden; }
+    button, input { font: inherit; }
+    button { -webkit-tap-highlight-color: transparent; }
+
+    #app {
+      width: 100%;
+      /* 100vh fallback first; 100dvh wins on modern mobile browsers.
+         Do not combine 100dvh with min-height: 100vh: on Android the
+         larger legacy viewport can push fixed UI under the system nav bar. */
+      height: 100vh;
+      height: 100dvh;
+      position: relative;
+      background: var(--bg);
+      overflow: hidden;
+    }
+
+    .topbar {
+      position: absolute;
+      inset: 0 0 auto 0;
+      height: calc(var(--topbar-h) + env(safe-area-inset-top, 0px));
+      padding: env(safe-area-inset-top, 0px) 14px 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      background: rgba(255,255,255,.96);
+      border-bottom: 1px solid var(--border);
+      z-index: 1200;
+      backdrop-filter: blur(12px);
+    }
+
+    .app-title {
+      min-width: 0;
+      font-size: 17px;
+      line-height: 1.1;
+      font-weight: 800;
+      letter-spacing: -.02em;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .topbar-actions {
+      flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      min-width: 0;
+    }
+
+    .sync-status {
+      flex: 0 1 auto;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      max-width: 32vw;
+      font-size: 11px;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+
+    .language-toggle {
+      flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+      padding: 2px;
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      background: #f1f3f4;
+    }
+
+    .language-btn {
+      min-width: 31px;
+      height: 26px;
+      padding: 0 7px;
+      border: 0;
+      border-radius: 7px;
+      background: transparent;
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 850;
+      cursor: pointer;
+    }
+
+    .language-btn.active {
+      background: var(--surface);
+      color: var(--accent);
+      box-shadow: 0 1px 4px rgba(22,31,38,.10);
+    }
+
+    .sync-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #8b949b;
+      box-shadow: 0 0 0 3px rgba(139,148,155,.12);
+    }
+    .sync-status.live .sync-dot { background: #2f9e44; box-shadow: 0 0 0 3px rgba(47,158,68,.12); }
+    .sync-status.error .sync-dot { background: #e03131; box-shadow: 0 0 0 3px rgba(224,49,49,.12); }
+
+    .main {
+      position: absolute;
+      top: calc(var(--topbar-h) + env(safe-area-inset-top, 0px));
+      bottom: calc(var(--nav-h) + env(safe-area-inset-bottom, 0px));
+      left: 0;
+      right: 0;
+      overflow: hidden;
+    }
+
+    .tab {
+      position: absolute;
+      inset: 0;
+      display: none;
+      background: var(--bg);
+    }
+    .tab.active { display: block; }
+
+    .tab-scroll {
+      height: 100%;
+      overflow-y: auto;
+      overscroll-behavior-y: contain;
+      -webkit-overflow-scrolling: touch;
+      padding: 16px 14px 28px;
+    }
+
+    #tab-map { background: #eceff1; }
+    #map { width: 100%; height: 100%; background: #edf0f2; }
+
+    .bottom-nav {
+      /* Anchor the actual controls above Android/iOS system navigation.
+         Chrome explicitly recommends using the safe-area inset as `bottom`
+         for bottom-anchored UI instead of growing the element with padding. */
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: env(safe-area-inset-bottom, 0px);
+      height: var(--nav-h);
+      padding: 0 4px;
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      background: rgba(255,255,255,.98);
+      border-top: 1px solid var(--border);
+      z-index: 1300;
+      backdrop-filter: blur(14px);
+    }
+
+    /* Firefox for Android currently keeps its layout/visual viewport above the
+       Android system navigation area. Applying safe-area-inset-bottom again
+       therefore creates an artificial gap between our nav and the system bar.
+       Gecko can be targeted without user-agent sniffing via -moz-appearance.
+       Desktop Firefox is unaffected because its bottom inset is already zero. */
+    @supports (-moz-appearance: none) {
+      .main {
+        bottom: var(--nav-h);
+      }
+
+      .bottom-nav {
+        bottom: 0;
+      }
+    }
+
+    .nav-btn {
+      appearance: none;
+      border: 0;
+      background: transparent;
+      color: #75808a;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 3px;
+      min-width: 0;
+      padding: 6px 2px;
+      cursor: pointer;
+    }
+    .nav-btn svg { width: 23px; height: 23px; stroke-width: 2; }
+    .nav-btn span { font-size: 10px; font-weight: 700; }
+    .nav-btn.active { color: var(--accent); }
+
+    .section-heading {
+      margin: 2px 2px 12px;
+      font-size: 22px;
+      line-height: 1.15;
+      letter-spacing: -.03em;
+      font-weight: 850;
+    }
+
+    .section-subtitle {
+      margin: -4px 2px 14px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.4;
+    }
+
+    .subheading {
+      margin: 24px 2px 10px;
+      font-size: 15px;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      font-weight: 800;
+      color: #53606a;
+    }
+
+    .card-list { display: grid; gap: 10px; }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: 0 1px 2px rgba(19,28,35,.03);
+    }
+
+    .tap-card {
+      width: 100%;
+      text-align: left;
+      appearance: none;
+      color: inherit;
+      cursor: pointer;
+      padding: 14px;
+    }
+    .tap-card:active { transform: scale(.995); }
+
+    .line-card {
+      display: grid;
+      grid-template-columns: 46px minmax(0,1fr) 20px;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .line-badge {
+      height: 38px;
+      min-width: 42px;
+      padding: 0 7px;
+      border-radius: 10px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--accent);
+      color: white;
+      font-weight: 850;
+      font-size: 15px;
+    }
+
+    .card-title { font-weight: 780; line-height: 1.25; }
+    .card-meta { margin-top: 4px; color: var(--muted); font-size: 12px; line-height: 1.35; }
+    .chevron { color: #9aa3aa; font-size: 22px; line-height: 1; }
+
+    .search-wrap {
+      position: sticky;
+      top: -16px;
+      z-index: 3;
+      margin: -16px -14px 12px;
+      padding: 12px 14px 10px;
+      background: linear-gradient(var(--bg) 82%, rgba(245,246,247,0));
+    }
+
+    .search {
+      width: 100%;
+      border: 1px solid var(--border);
+      background: white;
+      border-radius: 12px;
+      padding: 11px 13px;
+      color: var(--text);
+      outline: none;
+    }
+    .search:focus { border-color: #9bb6ca; box-shadow: 0 0 0 3px rgba(23,63,95,.08); }
+
+    .activity-card { padding: 14px; }
+    .activity-top, .route-top, .score-top {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .ticket-pill, .point-pill, .type-pill, .team-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      border-radius: 999px;
+      white-space: nowrap;
+      font-weight: 750;
+    }
+    .ticket-pill { background: #eaf4ef; color: #22633d; padding: 5px 8px; font-size: 12px; }
+    .point-pill { background: var(--accent-soft); color: var(--accent); padding: 6px 9px; font-size: 12px; }
+    .type-pill { background: var(--surface-2); color: #56616a; padding: 4px 7px; font-size: 10px; text-transform: uppercase; letter-spacing: .04em; }
+
+    .activity-description { margin-top: 8px; color: #4f5a63; font-size: 13px; line-height: 1.45; white-space: pre-wrap; }
+
+    .puzzle-card.has-location { cursor: pointer; }
+    .puzzle-location { margin-top: 8px; color: var(--accent); font-size: 12px; font-weight: 700; }
+    .puzzle-card:not(.has-location) .puzzle-location { color: var(--muted); }
+
+    .route-card { padding: 15px; }
+    .route-cities { font-size: 16px; font-weight: 850; letter-spacing: -.015em; }
+    .route-arrow { color: #8a949c; padding: 0 5px; }
+    .completed-label { margin-top: 13px; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; font-weight: 800; }
+    .team-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px; }
+    .team-chip { padding: 5px 8px; font-size: 11px; border: 1px solid rgba(0,0,0,.08); }
+    .team-dot { width: 8px; height: 8px; border-radius: 50%; }
+
+    .score-list { display: grid; gap: 13px; }
+    .score-card { position: relative; overflow: hidden; padding: 16px; }
+    .score-accent { position: absolute; inset: 0 auto 0 0; width: 5px; }
+    .rank { color: var(--muted); font-size: 12px; font-weight: 800; margin-bottom: 2px; }
+    .team-name { font-size: 18px; font-weight: 850; letter-spacing: -.02em; }
+    .total-points { text-align: right; }
+    .total-points strong { display: block; font-size: 27px; line-height: 1; letter-spacing: -.04em; }
+    .total-points span { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .05em; font-weight: 750; }
+    .ticket-balance { margin-top: 5px; font-size: 11px; color: #4d5962; }
+
+
+    .score-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0,1fr));
+      gap: 8px;
+      margin-top: 15px;
+    }
+    .metric {
+      border-radius: 12px;
+      background: #f6f8f9;
+      padding: 9px 8px;
+      min-width: 0;
+    }
+    .metric.winner { background: var(--gold-soft); }
+    .metric-label { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .045em; font-weight: 750; }
+    .metric-value-row {
+      margin-top: 3px;
+      display: flex;
+      align-items: baseline;
+      gap: 5px;
+      min-width: 0;
+      white-space: nowrap;
+    }
+    .metric-value { font-size: 18px; font-weight: 850; }
+    .metric-bonus {
+      color: var(--gold);
+      font-size: 9px;
+      font-weight: 850;
+      letter-spacing: -.01em;
+    }
+
+    .score-breakdown {
+      margin-top: 11px;
+      padding-top: 10px;
+      border-top: 1px solid var(--border);
+      display: grid;
+      gap: 7px;
+    }
+    .score-breakdown-row {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 14px;
+      min-width: 0;
+      font-size: 12px;
+    }
+    .score-small-label { color: #515c65; }
+    .score-small-value {
+      flex: 0 0 auto;
+      font-weight: 850;
+      font-variant-numeric: tabular-nums;
+    }
+    .score-small-value.gold-positive {
+      color: var(--gold);
+    }
+
+    .empty-state {
+      padding: 26px 16px;
+      text-align: center;
+      color: var(--muted);
+      background: white;
+      border: 1px dashed #cfd6da;
+      border-radius: var(--radius);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .map-selection {
+      position: absolute;
+      top: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 800;
+      display: none;
+      max-width: calc(100% - 24px);
+      background: rgba(255,255,255,.96);
+      border: 1px solid rgba(0,0,0,.09);
+      border-radius: 999px;
+      box-shadow: var(--shadow);
+      padding: 8px 10px 8px 12px;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      font-weight: 750;
+      backdrop-filter: blur(9px);
+    }
+    .map-selection.visible { display: flex; }
+    .map-selection-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .selection-close {
+      border: 0;
+      background: #e9edf0;
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      color: #4d5962;
+      cursor: pointer;
+      flex: 0 0 auto;
+    }
+
+    .detail-sheet {
+      position: absolute;
+      z-index: 1100;
+      left: 8px;
+      right: 8px;
+      bottom: 8px;
+      max-height: min(48vh, 430px);
+      background: rgba(255,255,255,.98);
+      border: 1px solid rgba(0,0,0,.10);
+      border-radius: 20px;
+      box-shadow: 0 14px 34px rgba(14,23,31,.22);
+      transform: translateY(calc(100% + 18px));
+      opacity: 0;
+      transition: transform .18s ease, opacity .18s ease;
+      overflow: hidden;
+      pointer-events: none;
+    }
+    .detail-sheet.open { transform: translateY(0); opacity: 1; pointer-events: auto; }
+    .detail-handle { width: 42px; height: 4px; border-radius: 99px; background: #d5dadd; margin: 8px auto 4px; }
+    .detail-content { overflow-y: auto; max-height: calc(min(48vh, 430px) - 16px); padding: 8px 15px 16px; }
+    .detail-close { position: absolute; top: 11px; right: 12px; width: 30px; height: 30px; border: 0; border-radius: 50%; background: #eef1f3; cursor: pointer; color: #4d5962; }
+    .detail-title { padding-right: 34px; font-size: 18px; font-weight: 850; letter-spacing: -.02em; }
+    .detail-lines { display: flex; flex-wrap: wrap; gap: 5px; margin: 9px 0 12px; }
+    .mini-line { padding: 4px 7px; border-radius: 7px; background: #eef2f4; font-size: 11px; font-weight: 800; }
+    .owner-status { padding: 9px 10px; border-radius: 11px; background: #f3f5f6; font-size: 12px; font-weight: 750; margin-bottom: 10px; }
+    .deposit-list { display: grid; gap: 6px; }
+    .deposit-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 0; border-bottom: 1px solid #eef1f3; font-size: 12px; }
+    .deposit-row:last-child { border-bottom: 0; }
+    .deposit-team { display: flex; align-items: center; gap: 7px; min-width: 0; }
+    .deposit-value { font-weight: 850; }
+
+    .ownership-help {
+      margin-top: 9px;
+      padding-top: 9px;
+      border-top: 1px solid #eef1f3;
+    }
+    .ownership-help-toggle {
+      width: 100%;
+      border: 0;
+      padding: 7px 2px;
+      background: transparent;
+      color: var(--accent);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      text-align: left;
+      font: inherit;
+      font-size: 11px;
+      font-weight: 820;
+      cursor: pointer;
+    }
+    .ownership-help-toggle-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .ownership-help-chevron {
+      color: var(--muted);
+      font-size: 16px;
+      line-height: 1;
+      transition: transform .16s ease;
+    }
+    .ownership-help-toggle[aria-expanded="true"] .ownership-help-chevron {
+      transform: rotate(90deg);
+    }
+    .ownership-help-panel {
+      margin-top: 4px;
+      padding: 10px 11px;
+      border-radius: 11px;
+      background: #f5f7f8;
+      color: #56616a;
+      font-size: 11px;
+      line-height: 1.48;
+    }
+
+    .puzzle-pin-wrap { background: none; border: 0; }
+    .puzzle-pin {
+      width: 28px;
+      height: 28px;
+      border-radius: 50% 50% 50% 8px;
+      transform: rotate(-45deg);
+      background: #7048a8;
+      color: white;
+      border: 2px solid white;
+      box-shadow: 0 2px 8px rgba(0,0,0,.25);
+      display: grid;
+      place-items: center;
+    }
+    .puzzle-pin span { transform: rotate(45deg); font-size: 14px; font-weight: 900; }
+    .puzzle-pin.selected { background: #2b1743; transform: rotate(-45deg) scale(1.18); }
+
+    .leaflet-control-zoom { border: 0 !important; box-shadow: var(--shadow) !important; }
+    .leaflet-control-zoom a { color: #35414a !important; border-color: var(--border) !important; }
+    .leaflet-control-attribution { font-size: 9px !important; background: rgba(255,255,255,.75) !important; }
+
+    .toast {
+      position: absolute;
+      z-index: 1600;
+      left: 50%;
+      top: calc(var(--topbar-h) + env(safe-area-inset-top, 0px) + 10px);
+      transform: translate(-50%, -12px);
+      opacity: 0;
+      pointer-events: none;
+      background: #25313a;
+      color: white;
+      padding: 9px 12px;
+      border-radius: 10px;
+      box-shadow: var(--shadow);
+      max-width: calc(100% - 30px);
+      font-size: 12px;
+      transition: .18s ease;
+    }
+    .toast.show { transform: translate(-50%, 0); opacity: 1; }
+
+    @media (min-width: 760px) {
+      .tab-scroll { max-width: 760px; margin: 0 auto; padding-left: 20px; padding-right: 20px; }
+      .bottom-nav {
+        left: 0;
+        right: 0;
+        transform: none;
+        width: auto;
+        border-left: 0;
+        border-right: 0;
+        border-radius: 0;
+        grid-template-columns: repeat(5, minmax(90px, 124px));
+        justify-content: center;
+      }
+      .detail-sheet { left: 50%; right: auto; width: 420px; transform: translate(-50%, calc(100% + 18px)); }
+      .detail-sheet.open { transform: translate(-50%, 0); }
+    }
+  </style>
+</head>
+<body>
+<div id="app">
+  <header class="topbar">
+    <div class="app-title" id="appTitle">Public Transport Game</div>
+    <div class="topbar-actions">
+      <div class="sync-status" id="syncStatus">
+        <span class="sync-dot"></span>
+        <span id="syncText" data-i18n="loading">Laden…</span>
+      </div>
+      <div class="language-toggle" id="languageToggle" role="group" aria-label="Taal" data-i18n-aria="language">
+        <button class="language-btn active" type="button" data-language="nl">NL</button>
+        <button class="language-btn" type="button" data-language="en">EN</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="main">
+    <section class="tab active" id="tab-map" data-tab="map">
+      <div id="map"></div>
+      <div class="map-selection" id="mapSelection">
+        <span class="map-selection-text" id="mapSelectionText"></span>
+        <button class="selection-close" id="mapSelectionClose" aria-label="Selectie wissen" data-i18n-aria="clearSelection">×</button>
+      </div>
+      <aside class="detail-sheet" id="detailSheet" aria-live="polite">
+        <div class="detail-handle"></div>
+        <button class="detail-close" id="detailClose" aria-label="Details sluiten" data-i18n-aria="closeDetails">×</button>
+        <div class="detail-content" id="detailContent"></div>
+      </aside>
+    </section>
+
+    <section class="tab" id="tab-lines" data-tab="lines">
+      <div class="tab-scroll" id="scroll-lines">
+        <div class="search-wrap">
+          <input class="search" id="lineSearch" type="search" placeholder="Zoek buslijnen…" data-i18n-placeholder="searchBusLines" autocomplete="off">
+        </div>
+        <h1 class="section-heading" data-i18n="busLines">Buslijnen</h1>
+        <p class="section-subtitle" data-i18n="lineSubtitle">Tik op een lijn om de route en haltes op de kaart uit te lichten.</p>
+        <div class="card-list" id="lineList"></div>
+      </div>
+    </section>
+
+    <section class="tab" id="tab-activities" data-tab="activities">
+      <div class="tab-scroll" id="scroll-activities">
+        <h1 class="section-heading" data-i18n="activities">Opdrachten &amp; puzzels</h1>
+        <p class="section-subtitle" data-i18n="activitiesSubtitle">
+          Ga voor puzzels naar de locatie op de kaart en stuur daar een groepsfoto
+          naar de spelleiding om de puzzel te ontvangen. Stuur de juiste oplossing
+          terug om hem te voltooien. Opdrachten kun je overal uitvoeren; stuur
+          bewijs naar de spelleiding.
+        </p>
+        <div class="subheading" data-i18n="puzzles">Puzzels</div>
+        <div class="card-list" id="puzzleList"></div>
+        <div class="subheading" data-i18n="tasks">Opdrachten</div>
+        <div class="card-list" id="taskList"></div>
+      </div>
+    </section>
+
+    <section class="tab" id="tab-routes" data-tab="routes">
+      <div class="tab-scroll" id="scroll-routes">
+        <h1 class="section-heading" data-i18n="routeBonuses">Routebonussen</h1>
+        <p class="section-subtitle" data-i18n="routeSubtitle">Verbind de twee steden met één aaneengesloten keten van haltes in bezit.</p>
+        <div class="card-list" id="routeList"></div>
+      </div>
+    </section>
+
+    <section class="tab" id="tab-scoreboard" data-tab="scoreboard">
+      <div class="tab-scroll" id="scroll-scoreboard">
+        <h1 class="section-heading" data-i18n="scoreboard">Scorebord</h1>
+        <p class="section-subtitle" data-i18n-html="scoreboardExplanation">
+          Je totaalscore is de som van <strong>haltepunten</strong>,
+          <strong>lijnpunten</strong>, <strong>routebonussen</strong> en eventuele
+          <strong>gouden bonussen</strong> voor de meeste haltes, opdrachten en puzzels.
+        </p>
+        <div class="score-list" id="scoreList"></div>
+      </div>
+    </section>
+  </main>
+
+  <nav class="bottom-nav" aria-label="Hoofdnavigatie" data-i18n-aria="mainNavigation">
+    <button class="nav-btn active" data-target="map" aria-label="Kaart" data-i18n-aria="navMap">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 6.5 8 4l8 2.5L21 4v13.5L16 20l-8-2.5L3 20Z"/><path d="M8 4v13.5M16 6.5V20"/></svg>
+      <span data-i18n="navMap">Kaart</span>
+    </button>
+    <button class="nav-btn" data-target="lines" aria-label="Buslijnen" data-i18n-aria="busLines">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="4" y="3" width="16" height="15" rx="3"/><path d="M7 18v2M17 18v2M4 10h16M8 14h.01M16 14h.01M8 6h8"/></svg>
+      <span data-i18n="navLines">Lijnen</span>
+    </button>
+    <button class="nav-btn" data-target="activities" aria-label="Opdrachten en puzzels" data-i18n-aria="activitiesAria">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M9 4h10v16H5V8"/><path d="m5 4 2 2 4-4M9 10h7M9 14h7"/></svg>
+      <span data-i18n="navTasks">Opdrachten</span>
+    </button>
+    <button class="nav-btn" data-target="routes" aria-label="Routebonussen" data-i18n-aria="routeBonuses">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="5" cy="17" r="2"/><circle cx="19" cy="7" r="2"/><path d="M7 17h3c4 0 3-10 7-10"/></svg>
+      <span data-i18n="navRoutes">Routes</span>
+    </button>
+    <button class="nav-btn" data-target="scoreboard" aria-label="Scorebord" data-i18n-aria="scoreboard">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M5 20v-7h4v7M10 20V8h4v12M15 20V4h4v16"/></svg>
+      <span data-i18n="navScores">Score</span>
+    </button>
+  </nav>
+
+  <div class="toast" id="toast"></div>
+</div>
+
+<script
+  src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+  integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+  crossorigin=""
+></script>
+<script>
+'use strict';
+
+// ============================================================================
+// Configuration — edit these values before publishing on GitHub Pages.
+// ============================================================================
+const CONFIG = {
+  APP_TITLE: 'RPW26: Ticket to Ride',
+  API_URL: 'https://script.google.com/macros/s/AKfycbwtjgFLDXY-47FMxTGWyplMBmiwqFJgoTsMgFMaF5MEDwdM1tRCjr02AXTpiG_ojMsI1A/exec',
+  NETWORK_URL: './data/web_network.geojson',
+  EDGES_URL: './data/game_edges.geojson',
+  POLL_MS: 10000,
+  BACKGROUND_POLL_MS: 60000,
+  FETCH_TIMEOUT_MS: 20000,
+};
+
+// ============================================================================
+// UI language. API-provided content (team names, task text, route cities, etc.)
+// is deliberately never translated here.
+// ============================================================================
+const LANGUAGE_STORAGE_KEY = 'ptg-ui-language';
+
+const I18N = {
+  nl: {
+    loading: 'Laden…',
+    language: 'Taal',
+    clearSelection: 'Selectie wissen',
+    closeDetails: 'Details sluiten',
+    searchBusLines: 'Zoek buslijnen…',
+    busLines: 'Buslijnen',
+    lineSubtitle: 'Tik op een lijn om de route en haltes op de kaart uit te lichten.',
+    activities: 'Opdrachten & puzzels',
+    activitiesSubtitle: 'Ga voor puzzels naar de locatie op de kaart en stuur daar een groepsfoto naar de spelleiding om de puzzel te ontvangen. Stuur de juiste oplossing terug om hem te voltooien. Opdrachten kun je overal uitvoeren; stuur bewijs naar de spelleiding.',
+    activitiesAria: 'Opdrachten en puzzels',
+    puzzles: 'Puzzels',
+    tasks: 'Opdrachten',
+    routeBonuses: 'Routebonussen',
+    routeSubtitle: 'Verbind de twee steden met één aaneengesloten keten van haltes in bezit.',
+    scoreboard: 'Scorebord',
+    scoreboardExplanation: 'Je totaalscore is de som van <strong>haltepunten</strong>, <strong>lijnpunten</strong>, <strong>routebonussen</strong> en eventuele <strong>gouden bonussen</strong> voor de meeste haltes, opdrachten en puzzels. Haltepunten komen van de waarde van je haltes; lijnpunten zijn het aantal haltes in je grootste aaneengesloten netwerk.',
+    mainNavigation: 'Hoofdnavigatie',
+    navMap: 'Kaart',
+    navLines: 'Lijnen',
+    navTasks: 'Opdrachten',
+    navRoutes: 'Routes',
+    navScores: 'Score',
+    lineSelection: 'Lijn {ref} · {name}',
+    unowned: 'Niet in bezit',
+    ownedBy: 'In bezit van {team}',
+    tiedNoOwner: 'Gelijkspel – geen eigenaar',
+    stopPoint: 'haltepunt',
+    stopPoints: 'haltepunten',
+    liveDepositsUnavailable: 'Live-inzetten niet beschikbaar.',
+    claimStopHelp: 'Hoe claim je een halte?',
+    claimStopExplanation: 'De halte is van het team met de meeste ingezette tickets. Om tickets in te zetten, stuur je de spelleiding een foto waarop te zien is dat jullie bij de halte zijn — te voet of vanuit de bus. Langsrijden mag, zolang je een foto hebt — plus het aantal tickets dat je wilt inzetten. Bij een gelijke hoogste inzet heeft niemand de halte.',
+    puzzleLocation: 'Puzzellocatie',
+    noLinesMatch: 'Geen buslijnen gevonden.',
+    showOnMap: '⌖ Toon op kaart',
+    noMapLocation: 'Geen kaartlocatie ingesteld',
+    noPuzzles: 'Er zijn nog geen puzzels gepubliceerd.',
+    noTasks: 'Er zijn nog geen opdrachten gepubliceerd.',
+    taskTypeOneTime: 'Eenmalig',
+    taskTypeRepeatable: 'Herhaalbaar',
+    perTime: ' / keer',
+    points: 'punten',
+    completedBy: 'Voltooid door',
+    notCompleted: 'Nog niet voltooid',
+    noRouteBonuses: 'Er zijn geen routebonussen ingesteld.',
+    available: 'beschikbaar',
+    totalPoints: 'totaal punten',
+    metricTasks: 'Opdrachten',
+    metricPuzzles: 'Puzzels',
+    metricStopsOwned: 'Haltes in bezit',
+    stopPointsLabel: 'Haltepunten',
+    linePointsLabel: 'Lijnpunten',
+    routeBonusLabel: 'Routebonussen',
+    goldBonusesLabel: 'Gouden bonussen',
+    noScoreboard: 'Scorebordgegevens zijn nog niet beschikbaar.',
+    invalidGameState: 'Ongeldige spelstatus',
+    setApiUrl: 'API-URL instellen',
+    connectionIssue: 'Verbindingsprobleem',
+    offline: 'Offline',
+    live: 'Live',
+    secondsAgo: '{count}s geleden',
+    minutesAgo: '{count}m geleden',
+    mapDataError: 'Fout in kaartgegevens',
+    mapDataLoadError: 'Kon {file} niet laden',
+    zoomIn: 'Inzoomen',
+    zoomOut: 'Uitzoomen',
+  },
+  en: {
+    loading: 'Loading…',
+    language: 'Language',
+    clearSelection: 'Clear selection',
+    closeDetails: 'Close details',
+    searchBusLines: 'Search bus lines…',
+    busLines: 'Bus lines',
+    lineSubtitle: 'Tap a line to highlight its route and stops on the map.',
+    activities: 'Tasks & puzzles',
+    activitiesSubtitle: 'For puzzles, go to the location marked on the map and send a group photo there to the game leaders to receive the puzzle. Send the correct solution back to complete it. Tasks can be completed anywhere; send proof to the game leaders.',
+    activitiesAria: 'Tasks and puzzles',
+    puzzles: 'Puzzles',
+    tasks: 'Tasks',
+    routeBonuses: 'Route bonuses',
+    routeSubtitle: 'Connect the two cities with one continuous chain of owned stops.',
+    scoreboard: 'Scoreboard',
+    scoreboardExplanation: 'Your total score is the sum of <strong>stop points</strong>, <strong>line points</strong>, <strong>Route Bonuses</strong>, and any <strong>Gold bonuses</strong> for the most stops, tasks, and puzzles. Stop points come from the value of your owned stops; line points are the number of stops in your largest connected network.',
+    mainNavigation: 'Main navigation',
+    navMap: 'Map',
+    navLines: 'Lines',
+    navTasks: 'Tasks',
+    navRoutes: 'Routes',
+    navScores: 'Scores',
+    lineSelection: 'Line {ref} · {name}',
+    unowned: 'Unowned',
+    ownedBy: 'Owned by {team}',
+    tiedNoOwner: 'Tied – no owner',
+    stopPoint: 'stop point',
+    stopPoints: 'stop points',
+    liveDepositsUnavailable: 'Live deposits unavailable.',
+    claimStopHelp: 'How do you claim a stop?',
+    claimStopExplanation: 'The stop belongs to the team with the most tickets deposited. To deposit tickets, send the game leaders a photo showing that your team is at the stop — on foot or from a bus. Passing by is fine as long as you get a photo — plus the number of tickets you want to deposit. If the highest deposit is tied, nobody owns the stop.',
+    puzzleLocation: 'Puzzle location',
+    noLinesMatch: 'No lines match your search.',
+    showOnMap: '⌖ Show on map',
+    noMapLocation: 'No map location configured',
+    noPuzzles: 'No puzzles have been published yet.',
+    noTasks: 'No tasks have been published yet.',
+    taskTypeOneTime: 'One-time',
+    taskTypeRepeatable: 'Repeatable',
+    perTime: ' / time',
+    points: 'pts',
+    completedBy: 'Completed by',
+    notCompleted: 'Not completed yet',
+    noRouteBonuses: 'No Route Bonuses have been configured.',
+    available: 'available',
+    totalPoints: 'total points',
+    metricTasks: 'Tasks',
+    metricPuzzles: 'Puzzles',
+    metricStopsOwned: 'Stops owned',
+    stopPointsLabel: 'Stop points',
+    linePointsLabel: 'Line points',
+    routeBonusLabel: 'Route bonuses',
+    goldBonusesLabel: 'Gold bonuses',
+    noScoreboard: 'Scoreboard data is not available yet.',
+    invalidGameState: 'Invalid game state',
+    setApiUrl: 'Set API URL',
+    connectionIssue: 'Connection issue',
+    offline: 'Offline',
+    live: 'Live',
+    secondsAgo: '{count}s ago',
+    minutesAgo: '{count}m ago',
+    mapDataError: 'Map data error',
+    mapDataLoadError: 'Could not load {file}',
+    zoomIn: 'Zoom in',
+    zoomOut: 'Zoom out',
+  },
+};
+
+function translatedTaskType(type) {
+  const raw = String(type || '').trim();
+  const normalized = raw.toLowerCase();
+
+  if (
+    normalized === 'one-time' ||
+    normalized === 'one time' ||
+    normalized === 'onetime'
+  ) {
+    return t('taskTypeOneTime');
+  }
+
+  if (normalized === 'repeatable') {
+    return t('taskTypeRepeatable');
+  }
+
+  // Unknown future backend values remain visible rather than being hidden.
+  return raw;
+}
+
+
+function storedLanguage() {
+  try {
+    const value = localStorage.getItem(LANGUAGE_STORAGE_KEY);
+    return value === 'en' || value === 'nl' ? value : 'nl';
+  } catch (_) {
+    return 'nl';
+  }
+}
+
+function t(key, params = {}) {
+  const language = uiState?.language || 'nl';
+  const template = I18N[language]?.[key] ?? I18N.nl[key] ?? key;
+  return String(template).replace(/\{(\w+)\}/g, (_, name) =>
+    Object.prototype.hasOwnProperty.call(params, name) ? String(params[name]) : `{${name}}`
+  );
+}
+
+// ============================================================================
+// Persistent UI state — live refreshes NEVER replace this object.
+// ============================================================================
+const uiState = {
+  language: storedLanguage(),
+  activeTab: 'map',
+  selectedLineId: null,
+  selectedStopId: null,
+  stopOwnershipHelpOpen: false,
+  selectedPuzzleId: null,
+  scrollTop: {
+    lines: 0,
+    activities: 0,
+    routes: 0,
+    scoreboard: 0,
+  },
+};
+
+let gameState = null;
+let networkData = null;
+let edgeData = null;
+let lineMeta = [];
+let stopFeatureById = new Map();
+let teamByName = new Map();
+let lastSuccessAt = null;
+let pollTimer = null;
+let pollInFlight = false;
+let pollErrorCount = 0;
+let toastTimer = null;
+let syncStatusState = { kind: '', key: 'loading', params: {} };
+
+// Leaflet objects are created once and updated in place.
+let map = null;
+let initialNetworkFitDone = false;
+const lineLayersById = new Map();
+const stopLayersById = new Map();
+const edgeLayersById = new Map();
+const puzzleLayersById = new Map();
+let networkBounds = null;
+
+const el = id => document.getElementById(id);
+
+// ============================================================================
+// Utilities
+// ============================================================================
+function naturalCompare(a, b) {
+  return String(a ?? '').localeCompare(String(b ?? ''), undefined, {
+    numeric: true,
+    sensitivity: 'base',
+  });
+}
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;');
+}
+
+function safeColor(value, fallback = '#68737c') {
+  return /^#[0-9a-f]{6}$/i.test(String(value || '')) ? value : fallback;
+}
+
+function alphaColor(hex, alpha) {
+  const clean = safeColor(hex).slice(1);
+  const r = parseInt(clean.slice(0, 2), 16);
+  const g = parseInt(clean.slice(2, 4), 16);
+  const b = parseInt(clean.slice(4, 6), 16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+function formatNumber(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return '0';
+  return Number.isInteger(number) ? String(number) : String(Math.round(number * 100) / 100);
+}
+
+function sameJson(a, b) {
+  return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+}
+
+function stopOwnersChanged(previousStops, nextStops) {
+  const previous = previousStops || {};
+  const next = nextStops || {};
+  const previousIds = Object.keys(previous);
+  const nextIds = Object.keys(next);
+
+  if (previousIds.length !== nextIds.length) return true;
+
+  for (const stopId of nextIds) {
+    if (!(stopId in previous)) return true;
+    if ((previous[stopId]?.owner || null) !== (next[stopId]?.owner || null)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function showToast(message) {
+  const node = el('toast');
+  node.textContent = message;
+  node.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => node.classList.remove('show'), 2600);
+}
+
+function teamColor(name) {
+  return safeColor(teamByName.get(name)?.color);
+}
+
+function isApiConfigured() {
+  return CONFIG.API_URL && !CONFIG.API_URL.includes('PASTE_APPS_SCRIPT');
+}
+
+function applyStaticTranslations() {
+  document.documentElement.lang = uiState.language;
+
+  document.querySelectorAll('[data-i18n]').forEach(node => {
+    node.textContent = t(node.dataset.i18n);
+  });
+
+  document.querySelectorAll('[data-i18n-html]').forEach(node => {
+    node.innerHTML = t(node.dataset.i18nHtml);
+  });
+  document.querySelectorAll('[data-i18n-placeholder]').forEach(node => {
+    node.setAttribute('placeholder', t(node.dataset.i18nPlaceholder));
+  });
+  document.querySelectorAll('[data-i18n-aria]').forEach(node => {
+    node.setAttribute('aria-label', t(node.dataset.i18nAria));
+  });
+  document.querySelectorAll('[data-language]').forEach(button => {
+    button.classList.toggle('active', button.dataset.language === uiState.language);
+    button.setAttribute('aria-pressed', button.dataset.language === uiState.language ? 'true' : 'false');
+  });
+
+  updateZoomControlLanguage();
+}
+
+function updateZoomControlLanguage() {
+  if (!map?.zoomControl) return;
+  const zoomIn = map.zoomControl._zoomInButton;
+  const zoomOut = map.zoomControl._zoomOutButton;
+  if (zoomIn) {
+    zoomIn.title = t('zoomIn');
+    zoomIn.setAttribute('aria-label', t('zoomIn'));
+  }
+  if (zoomOut) {
+    zoomOut.title = t('zoomOut');
+    zoomOut.setAttribute('aria-label', t('zoomOut'));
+  }
+}
+
+function setLanguage(language) {
+  if (language !== 'nl' && language !== 'en') return;
+  if (uiState.language === language) return;
+
+  uiState.language = language;
+  try { localStorage.setItem(LANGUAGE_STORAGE_KEY, language); } catch (_) {}
+
+  applyStaticTranslations();
+  renderLineList();
+  renderActivities();
+  renderRoutes();
+  renderScoreboard();
+  updateLineHighlight(false);
+  renderSyncStatus();
+
+  if (uiState.selectedStopId) renderStopDetail(uiState.selectedStopId);
+  if (uiState.selectedPuzzleId) renderPuzzleDetail(uiState.selectedPuzzleId);
+}
+
+document.querySelectorAll('[data-language]').forEach(button => {
+  button.addEventListener('click', () => setLanguage(button.dataset.language));
+});
+
+// ============================================================================
+// Tabs / navigation
+// ============================================================================
+function saveActiveScroll() {
+  if (uiState.activeTab === 'map') return;
+  const scroller = el(`scroll-${uiState.activeTab}`);
+  if (scroller) uiState.scrollTop[uiState.activeTab] = scroller.scrollTop;
+}
+
+function switchTab(target) {
+  if (target === uiState.activeTab) return;
+  saveActiveScroll();
+  uiState.activeTab = target;
+
+  document.querySelectorAll('.tab').forEach(node => {
+    node.classList.toggle('active', node.dataset.tab === target);
+  });
+  document.querySelectorAll('.nav-btn').forEach(node => {
+    node.classList.toggle('active', node.dataset.target === target);
+  });
+
+  if (target === 'map') {
+    requestAnimationFrame(() => map?.invalidateSize({ pan: false }));
+  } else {
+    const scroller = el(`scroll-${target}`);
+    if (scroller) requestAnimationFrame(() => {
+      scroller.scrollTop = uiState.scrollTop[target] || 0;
+    });
+  }
+}
+
+document.querySelectorAll('.nav-btn').forEach(button => {
+  button.addEventListener('click', () => switchTab(button.dataset.target));
+});
+
+// ============================================================================
+// Map setup / static network
+// ============================================================================
+function initMap() {
+  map = L.map('map', {
+    preferCanvas: true,
+    zoomControl: true,
+    attributionControl: true,
+  });
+
+  L.tileLayer(
+    'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+    {
+      subdomains: 'abcd',
+      maxZoom: 20,
+      attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
+    }
+  ).addTo(map);
+
+  map.createPane('routes');
+  map.getPane('routes').style.zIndex = 300;
+  map.createPane('selectedRoutes');
+  map.getPane('selectedRoutes').style.zIndex = 315;
+  map.createPane('ownedEdges');
+  map.getPane('ownedEdges').style.zIndex = 330;
+  map.createPane('stops');
+  map.getPane('stops').style.zIndex = 410;
+  map.createPane('puzzles');
+  map.getPane('puzzles').style.zIndex = 430;
+
+  map.setView([52.10, 4.50], 10);
+  map.on('click', closeDetailSheet);
+}
+
+async function loadStaticNetwork() {
+  const [networkResponse, edgeResponse] = await Promise.all([
+    fetch(CONFIG.NETWORK_URL, { cache: 'force-cache' }),
+    fetch(CONFIG.EDGES_URL, { cache: 'force-cache' }),
+  ]);
+
+  if (!networkResponse.ok) throw new Error(t('mapDataLoadError', { file: CONFIG.NETWORK_URL }));
+  if (!edgeResponse.ok) throw new Error(t('mapDataLoadError', { file: CONFIG.EDGES_URL }));
+
+  networkData = await networkResponse.json();
+  edgeData = await edgeResponse.json();
+
+  buildStaticNetworkLayers();
+  renderLineList();
+}
+
+function buildStaticNetworkLayers() {
+  const routeFeatures = [];
+  const stopFeatures = [];
+
+  for (const feature of networkData.features || []) {
+    const type = feature?.geometry?.type;
+    if (type === 'Point') stopFeatures.push(feature);
+    else if (type === 'LineString' || type === 'MultiLineString') routeFeatures.push(feature);
+  }
+
+  stopFeatureById = new Map(
+    stopFeatures.map(feature => [feature.properties.stop_id, feature])
+  );
+
+  // Logical line metadata + stop sets.
+  const lines = new Map();
+  for (const feature of routeFeatures) {
+    const p = feature.properties || {};
+    if (!p.line_id) continue;
+    if (!lines.has(p.line_id)) {
+      lines.set(p.line_id, {
+        lineId: p.line_id,
+        lineRef: String(p.line_ref ?? ''),
+        lineName: String(p.line_name ?? ''),
+        agencyId: String(p.agency_id ?? ''),
+        stopIds: new Set(),
+        bounds: L.latLngBounds([]),
+      });
+    }
+  }
+
+  // The compact web network deliberately omits verbose stop_sequence arrays.
+  // Stop membership per logical line is reconstructed from the Point features'
+  // line_ids arrays instead.
+  for (const feature of stopFeatures) {
+    const stopId = feature.properties?.stop_id;
+    for (const lineId of feature.properties?.line_ids || []) {
+      if (lines.has(lineId)) lines.get(lineId).stopIds.add(stopId);
+    }
+  }
+
+  lineMeta = [...lines.values()].sort((a, b) => {
+    const byRef = naturalCompare(a.lineRef, b.lineRef);
+    return byRef || naturalCompare(a.lineName, b.lineName) || naturalCompare(a.lineId, b.lineId);
+  });
+
+  // Full route geometry. Create the polylines directly so their dedicated
+  // Leaflet pane is fixed at construction time; this guarantees ownership
+  // overlays remain above highlighted bus routes.
+  for (const feature of routeFeatures) {
+    const coordinates = feature.geometry?.coordinates || [];
+    const latlngs = coordinates.map(point => [point[1], point[0]]);
+    const lineId = feature.properties?.line_id;
+    const layer = L.polyline(latlngs, {
+      pane: 'routes',
+      color: '#aeb5ba',
+      weight: 2.2,
+      opacity: .58,
+      lineCap: 'round',
+      lineJoin: 'round',
+      interactive: false,
+    }).addTo(map);
+
+    if (!lineLayersById.has(lineId)) lineLayersById.set(lineId, []);
+    lineLayersById.get(lineId).push(layer);
+    const meta = lines.get(lineId);
+    if (meta) meta.bounds.extend(layer.getBounds());
+  }
+
+  // Ownership overlay. Unowned logical edges are transparent because the
+  // neutral network is already visible beneath them.
+  for (const feature of edgeData.features || []) {
+    const coordinates = feature.geometry?.coordinates || [];
+    const latlngs = coordinates.map(point => [point[1], point[0]]);
+    const layer = L.polyline(latlngs, {
+      pane: 'ownedEdges',
+      color: '#888',
+      weight: 5.5,
+      opacity: 0,
+      lineCap: 'round',
+      lineJoin: 'round',
+      interactive: false,
+    }).addTo(map);
+    edgeLayersById.set(feature.properties.edge_id, { feature, layer });
+  }
+
+  // Stops.
+  const stopGroup = L.geoJSON(stopFeatures, {
+    pointToLayer(feature, latlng) {
+      const marker = L.circleMarker(latlng, {
+        pane: 'stops',
+        radius: 5.2,
+        color: '#65717a',
+        weight: 1.5,
+        fillColor: '#ffffff',
+        fillOpacity: .96,
+      });
+      stopLayersById.set(feature.properties.stop_id, { feature, layer: marker });
+      return marker;
+    },
+    onEachFeature(feature, layer) {
+      layer.on('click', event => {
+        L.DomEvent.stopPropagation(event);
+        openStop(feature.properties.stop_id);
+      });
+    },
+  }).addTo(map);
+
+  networkBounds = stopGroup.getBounds();
+  if (!initialNetworkFitDone && networkBounds.isValid()) {
+    map.fitBounds(networkBounds.pad(.04), { animate: false });
+    initialNetworkFitDone = true;
+  }
+
+  updateLineHighlight(false);
+  updateMapDynamicState();
+}
+
+function lineStopIds(lineId) {
+  return lineMeta.find(line => line.lineId === lineId)?.stopIds || new Set();
+}
+
+function updateLineHighlight(fit = false) {
+  const selected = uiState.selectedLineId;
+  for (const [lineId, layers] of lineLayersById) {
+    const isSelected = selected === lineId;
+    for (const layer of layers) {
+      layer.setStyle(selected ? {
+        color: isSelected ? '#314c60' : '#c5cace',
+        weight: isSelected ? 5 : 1.7,
+        opacity: isSelected ? .92 : .28,
+      } : {
+        color: '#aeb5ba',
+        weight: 2.2,
+        opacity: .58,
+      });
+      if (isSelected) layer.bringToFront();
+    }
+  }
+
+  updateStopMarkerStyles();
+
+  const selection = el('mapSelection');
+  if (selected) {
+    const meta = lineMeta.find(line => line.lineId === selected);
+    el('mapSelectionText').textContent = meta
+      ? t('lineSelection', { ref: meta.lineRef, name: meta.lineName })
+      : selected;
+    selection.classList.add('visible');
+    if (fit && meta?.bounds?.isValid()) {
+      map.fitBounds(meta.bounds.pad(.07), { animate: true, duration: .35 });
+    }
+  } else {
+    selection.classList.remove('visible');
+  }
+}
+
+function selectLine(lineId) {
+  uiState.selectedLineId = lineId;
+  uiState.selectedPuzzleId = null;
+  switchTab('map');
+  closeDetailSheet();
+  updatePuzzleSelection();
+  requestAnimationFrame(() => updateLineHighlight(true));
+}
+
+function clearMapSelection() {
+  uiState.selectedLineId = null;
+  uiState.selectedPuzzleId = null;
+  updateLineHighlight(false);
+  updatePuzzleSelection();
+}
+
+el('mapSelectionClose').addEventListener('click', event => {
+  event.stopPropagation();
+  clearMapSelection();
+});
+
+// ============================================================================
+// Dynamic map styling
+// ============================================================================
+function stopDynamicStyle(stopId) {
+  const dynamic = gameState?.stops?.[stopId];
+  if (dynamic?.owner && teamByName.has(dynamic.owner)) {
+    const color = teamColor(dynamic.owner);
+    return {
+      color: '#ffffff',
+      fillColor: color,
+      fillOpacity: .98,
+    };
+  }
+  return {
+    color: '#65717a',
+    fillColor: '#ffffff',
+    fillOpacity: .96,
+  };
+}
+
+
+function updateStopMarkerStyles() {
+  const selectedLineStops = uiState.selectedLineId
+    ? lineStopIds(uiState.selectedLineId)
+    : null;
+
+  for (const [stopId, entry] of stopLayersById) {
+    const dynamic = stopDynamicStyle(stopId);
+    const inSelectedLine = !selectedLineStops || selectedLineStops.has(stopId);
+    const isSelectedStop = uiState.selectedStopId === stopId;
+
+    entry.layer.setStyle({
+      ...dynamic,
+      radius: isSelectedStop
+        ? 8.3
+        : (uiState.selectedLineId && inSelectedLine ? 6.6 : 5.2),
+      opacity: isSelectedStop
+        ? 1
+        : (uiState.selectedLineId && !inSelectedLine ? .22 : 1),
+      fillOpacity: isSelectedStop
+        ? 1
+        : (uiState.selectedLineId && !inSelectedLine ? .16 : dynamic.fillOpacity),
+      weight: isSelectedStop
+        ? 3.2
+        : (uiState.selectedLineId && inSelectedLine ? 2.2 : 1.5),
+      color: isSelectedStop
+        ? '#15242e'
+        : (uiState.selectedLineId && inSelectedLine ? '#243845' : dynamic.color),
+    });
+
+    if (isSelectedStop) entry.layer.bringToFront();
+  }
+}
+
+function updateMapOwnershipState() {
+  if (!networkData || !edgeData) return;
+
+  updateStopMarkerStyles();
+
+  for (const { feature, layer } of edgeLayersById.values()) {
+    const a = gameState?.stops?.[feature.properties.stop_a]?.owner;
+    const b = gameState?.stops?.[feature.properties.stop_b]?.owner;
+    const sameOwner = a && b && a === b && teamByName.has(a);
+    layer.setStyle(sameOwner ? {
+      color: teamColor(a),
+      weight: 6,
+      opacity: .94,
+    } : {
+      color: '#888',
+      weight: 5.5,
+      opacity: 0,
+    });
+  }
+
+  if (uiState.selectedStopId) renderStopDetail(uiState.selectedStopId);
+}
+
+function updateMapDynamicState() {
+  updateMapOwnershipState();
+  updatePuzzleMarkers();
+
+  if (uiState.selectedPuzzleId) renderPuzzleDetail(uiState.selectedPuzzleId);
+}
+
+function updatePuzzleMarkers() {
+  const liveIds = new Set();
+  for (const puzzle of gameState?.puzzles || []) {
+    if (!Number.isFinite(puzzle.latitude) || !Number.isFinite(puzzle.longitude)) continue;
+    liveIds.add(puzzle.id);
+
+    let marker = puzzleLayersById.get(puzzle.id);
+    if (!marker) {
+      marker = L.marker([puzzle.latitude, puzzle.longitude], {
+        pane: 'puzzles',
+        icon: puzzleIcon(puzzle.id === uiState.selectedPuzzleId),
+        keyboard: true,
+      });
+      marker.on('click', event => {
+        L.DomEvent.stopPropagation(event);
+        focusPuzzle(puzzle.id, false);
+      });
+      marker.addTo(map);
+      puzzleLayersById.set(puzzle.id, marker);
+    } else {
+      marker.setLatLng([puzzle.latitude, puzzle.longitude]);
+      marker.setIcon(puzzleIcon(puzzle.id === uiState.selectedPuzzleId));
+    }
+  }
+
+  for (const [id, marker] of puzzleLayersById) {
+    if (!liveIds.has(id)) {
+      marker.remove();
+      puzzleLayersById.delete(id);
+    }
+  }
+}
+
+function puzzleIcon(selected) {
+  return L.divIcon({
+    className: 'puzzle-pin-wrap',
+    html: `<div class="puzzle-pin ${selected ? 'selected' : ''}"><span>?</span></div>`,
+    iconSize: [30, 30],
+    iconAnchor: [10, 26],
+  });
+}
+
+function updatePuzzleSelection() {
+  for (const [id, marker] of puzzleLayersById) {
+    marker.setIcon(puzzleIcon(id === uiState.selectedPuzzleId));
+  }
+}
+
+
+// ============================================================================
+// Map details
+// ============================================================================
+function openDetailSheet() { el('detailSheet').classList.add('open'); }
+function closeDetailSheet() {
+  el('detailSheet').classList.remove('open');
+  const hadStop = Boolean(uiState.selectedStopId);
+  const hadPuzzle = Boolean(uiState.selectedPuzzleId);
+  uiState.selectedStopId = null;
+  uiState.stopOwnershipHelpOpen = false;
+  uiState.selectedPuzzleId = null;
+  if (hadStop) updateStopMarkerStyles();
+  if (hadPuzzle) updatePuzzleSelection();
+}
+el('detailClose').addEventListener('click', closeDetailSheet);
+
+function openStop(stopId) {
+  if (uiState.selectedStopId !== stopId) {
+    uiState.stopOwnershipHelpOpen = false;
+  }
+  uiState.selectedStopId = stopId;
+  uiState.selectedPuzzleId = null;
+  updatePuzzleSelection();
+  updateStopMarkerStyles();
+  renderStopDetail(stopId);
+  openDetailSheet();
+}
+
+function renderStopDetail(stopId) {
+  const feature = stopFeatureById.get(stopId);
+  if (!feature) return;
+  const p = feature.properties || {};
+  const dynamic = gameState?.stops?.[stopId] || {};
+  const lines = [...new Set((p.line_refs || []).map(String))].sort(naturalCompare);
+
+  let ownerText = t('unowned');
+  let ownerStyle = '';
+  if (dynamic.owner) {
+    ownerText = t('ownedBy', { team: dynamic.owner });
+    ownerStyle = `style="border-left:4px solid ${safeColor(teamColor(dynamic.owner))}"`;
+  } else if (Number(dynamic.winningDeposit) > 0) {
+    ownerText = t('tiedNoOwner');
+  }
+
+  const deposits = (gameState?.teams || []).map((team, index) => {
+    const value = dynamic.deposits?.[index];
+    return `
+      <div class="deposit-row">
+        <div class="deposit-team">
+          <span class="team-dot" style="background:${safeColor(team.color)}"></span>
+          <span>${escapeHtml(team.name)}</span>
+        </div>
+        <span class="deposit-value">${value === null || value === undefined ? '—' : `🎟 ${escapeHtml(formatNumber(value))}`}</span>
+      </div>`;
+  }).join('');
+
+  el('detailContent').innerHTML = `
+    <div class="detail-title">${escapeHtml(p.stop_name || p.name || stopId)}</div>
+    <div class="detail-lines">${lines.map(ref => `<span class="mini-line">${escapeHtml(ref)}</span>`).join('')}</div>
+    <div class="owner-status" ${ownerStyle}>${escapeHtml(ownerText)} · ${escapeHtml(p.num_lines ?? 0)} ${escapeHtml(Number(p.num_lines) === 1 ? t('stopPoint') : t('stopPoints'))}</div>
+    <div class="deposit-list">${deposits || `<div class="card-meta">${escapeHtml(t('liveDepositsUnavailable'))}</div>`}</div>
+    <div class="ownership-help">
+      <button
+        type="button"
+        class="ownership-help-toggle"
+        id="ownershipHelpToggle"
+        aria-expanded="${uiState.stopOwnershipHelpOpen ? 'true' : 'false'}"
+        aria-controls="ownershipHelpPanel"
+      >
+        <span class="ownership-help-toggle-label">ⓘ ${escapeHtml(t('claimStopHelp'))}</span>
+        <span class="ownership-help-chevron" aria-hidden="true">›</span>
+      </button>
+      <div
+        class="ownership-help-panel"
+        id="ownershipHelpPanel"
+        ${uiState.stopOwnershipHelpOpen ? '' : 'hidden'}
+      >${escapeHtml(t('claimStopExplanation'))}</div>
+    </div>
+  `;
+
+  const helpToggle = el('ownershipHelpToggle');
+  const helpPanel = el('ownershipHelpPanel');
+  helpToggle?.addEventListener('click', () => {
+    uiState.stopOwnershipHelpOpen = !uiState.stopOwnershipHelpOpen;
+    helpToggle.setAttribute('aria-expanded', uiState.stopOwnershipHelpOpen ? 'true' : 'false');
+    if (helpPanel) helpPanel.hidden = !uiState.stopOwnershipHelpOpen;
+  });
+}
+
+function renderPuzzleDetail(puzzleId) {
+  const puzzle = (gameState?.puzzles || []).find(item => item.id === puzzleId);
+  if (!puzzle) return;
+  el('detailContent').innerHTML = `
+    <div class="detail-title">${escapeHtml(puzzle.title)}</div>
+    <div class="detail-lines"><span class="ticket-pill">🎟 ${escapeHtml(formatNumber(puzzle.tickets))}</span></div>
+    <div class="card-meta">${escapeHtml(t('puzzleLocation'))}</div>
+  `;
+  openDetailSheet();
+}
+
+function focusPuzzle(puzzleId, moveMap = true) {
+  const puzzle = (gameState?.puzzles || []).find(item => item.id === puzzleId);
+  if (!puzzle || !Number.isFinite(puzzle.latitude) || !Number.isFinite(puzzle.longitude)) return;
+  uiState.selectedPuzzleId = puzzleId;
+  uiState.selectedLineId = null;
+  uiState.selectedStopId = null;
+  uiState.stopOwnershipHelpOpen = false;
+  switchTab('map');
+  updateLineHighlight(false);
+  updateStopMarkerStyles();
+  updatePuzzleSelection();
+  renderPuzzleDetail(puzzleId);
+  if (moveMap) {
+    requestAnimationFrame(() => map.flyTo([puzzle.latitude, puzzle.longitude], Math.max(map.getZoom(), 15), { duration: .45 }));
+  }
+}
+
+// ============================================================================
+// Lists
+// ============================================================================
+function renderLineList() {
+  const scroll = el('scroll-lines').scrollTop;
+  const query = el('lineSearch').value.trim().toLowerCase();
+  const filtered = lineMeta.filter(line =>
+    !query || `${line.lineRef} ${line.lineName} ${line.agencyId}`.toLowerCase().includes(query)
+  );
+
+  el('lineList').innerHTML = filtered.length ? filtered.map(line => `
+    <button class="card tap-card line-card" data-line-id="${escapeHtml(line.lineId)}">
+      <span class="line-badge">${escapeHtml(line.lineRef)}</span>
+      <span>
+        <span class="card-title">${escapeHtml(line.lineName)}</span>
+        <span class="card-meta">${escapeHtml(line.agencyId)}</span>
+      </span>
+      <span class="chevron">›</span>
+    </button>
+  `).join('') : `<div class="empty-state">${escapeHtml(t('noLinesMatch'))}</div>`;
+
+  el('lineList').querySelectorAll('[data-line-id]').forEach(card => {
+    card.addEventListener('click', () => selectLine(card.dataset.lineId));
+  });
+
+  requestAnimationFrame(() => { el('scroll-lines').scrollTop = scroll; });
+}
+el('lineSearch').addEventListener('input', renderLineList);
+
+function renderActivities() {
+  const scroll = el('scroll-activities').scrollTop;
+  const puzzles = gameState?.puzzles || [];
+  const tasks = gameState?.tasks || [];
+
+  el('puzzleList').innerHTML = puzzles.length ? puzzles.map(puzzle => {
+    const hasLocation = Number.isFinite(puzzle.latitude) && Number.isFinite(puzzle.longitude);
+    return `
+      <div class="card activity-card puzzle-card ${hasLocation ? 'has-location' : ''}" data-puzzle-id="${escapeHtml(puzzle.id)}">
+        <div class="activity-top">
+          <div class="card-title">${escapeHtml(puzzle.title || puzzle.id)}</div>
+          <span class="ticket-pill">🎟 ${escapeHtml(formatNumber(puzzle.tickets))}</span>
+        </div>
+        <div class="puzzle-location">${escapeHtml(hasLocation ? t('showOnMap') : t('noMapLocation'))}</div>
+      </div>`;
+  }).join('') : `<div class="empty-state">${escapeHtml(t('noPuzzles'))}</div>`;
+
+  el('taskList').innerHTML = tasks.length ? tasks.map(task => `
+    <div class="card activity-card">
+      <div class="activity-top">
+        <div>
+          <div class="card-title">${escapeHtml(task.title || task.id)}</div>
+          ${task.type ? `<div style="margin-top:6px"><span class="type-pill">${escapeHtml(translatedTaskType(task.type))}</span></div>` : ''}
+        </div>
+        <span class="ticket-pill">🎟 ${escapeHtml(formatNumber(task.tickets))}${String(task.type).toLowerCase() === 'repeatable' ? escapeHtml(t('perTime')) : ''}</span>
+      </div>
+      ${task.description ? `<div class="activity-description">${escapeHtml(task.description)}</div>` : ''}
+    </div>
+  `).join('') : `<div class="empty-state">${escapeHtml(t('noTasks'))}</div>`;
+
+  el('puzzleList').querySelectorAll('[data-puzzle-id]').forEach(card => {
+    const id = card.dataset.puzzleId;
+    const puzzle = puzzles.find(item => item.id === id);
+    if (Number.isFinite(puzzle?.latitude) && Number.isFinite(puzzle?.longitude)) {
+      card.addEventListener('click', () => focusPuzzle(id, true));
+    }
+  });
+
+  requestAnimationFrame(() => { el('scroll-activities').scrollTop = scroll; });
+}
+
+function renderRoutes() {
+  const scroll = el('scroll-routes').scrollTop;
+  const routes = gameState?.routeBonuses || [];
+
+  el('routeList').innerHTML = routes.length ? routes.map(route => {
+    const chips = (route.completedBy || []).map(name => {
+      const color = teamColor(name);
+      return `<span class="team-chip" style="background:${alphaColor(color,.11)};color:${safeColor(color)}"><span class="team-dot" style="background:${safeColor(color)}"></span>${escapeHtml(name)}</span>`;
+    }).join('');
+
+    return `
+      <div class="card route-card">
+        <div class="route-top">
+          <div class="route-cities">${escapeHtml(route.cityA)} <span class="route-arrow">→</span> ${escapeHtml(route.cityB)}</div>
+          <span class="point-pill">${escapeHtml(formatNumber(route.points))} ${escapeHtml(t('points'))}</span>
+        </div>
+        <div class="completed-label">${escapeHtml(t('completedBy'))}</div>
+        <div class="team-chips">${chips || `<span class="card-meta">${escapeHtml(t('notCompleted'))}</span>`}</div>
+      </div>`;
+  }).join('') : `<div class="empty-state">${escapeHtml(t('noRouteBonuses'))}</div>`;
+
+  requestAnimationFrame(() => { el('scroll-routes').scrollTop = scroll; });
+}
+
+function renderScoreboard() {
+  const scroll = el('scroll-scoreboard').scrollTop;
+  const scores = [...(gameState?.scoreboard || [])]
+    .sort((a, b) => b.totalPoints - a.totalPoints || naturalCompare(a.team, b.team));
+
+  el('scoreList').innerHTML = scores.length ? scores.map((score, index) => {
+    const color = teamColor(score.team);
+    const taskWinner = Number(score.mostTasksBonus) > 0;
+    const puzzleWinner = Number(score.mostPuzzlesBonus) > 0;
+    const stopWinner = Number(score.mostStopsBonus) > 0;
+
+    const metric = (label, value, bonus, winner) => `
+      <div class="metric ${winner ? 'winner' : ''}">
+        <div class="metric-label">${label}</div>
+        <div class="metric-value-row">
+          <span class="metric-value">${escapeHtml(formatNumber(value))}</span>
+          ${winner ? `<span class="metric-bonus">★ +${escapeHtml(formatNumber(bonus))}</span>` : ''}
+        </div>
+      </div>`;
+
+    const goldBonuses =
+      Number(score.mostStopsBonus || 0) +
+      Number(score.mostTasksBonus || 0) +
+      Number(score.mostPuzzlesBonus || 0);
+
+    return `
+      <div class="card score-card">
+        <div class="score-accent" style="background:${safeColor(color)}"></div>
+        <div class="score-top">
+          <div>
+            <div class="rank">#${index + 1}</div>
+            <div class="team-name">${escapeHtml(score.team)}</div>
+            <div class="ticket-balance">🎟 ${escapeHtml(formatNumber(score.ticketsAvailable))} ${escapeHtml(t('available'))}</div>
+          </div>
+          <div class="total-points"><strong>${escapeHtml(formatNumber(score.totalPoints))}</strong><span>${escapeHtml(t('totalPoints'))}</span></div>
+        </div>
+        <div class="score-grid">
+          ${metric(t('metricTasks'), score.tasksCompleted, score.mostTasksBonus, taskWinner)}
+          ${metric(t('metricPuzzles'), score.puzzlesCompleted, score.mostPuzzlesBonus, puzzleWinner)}
+          ${metric(t('metricStopsOwned'), score.stopsOwned, score.mostStopsBonus, stopWinner)}
+        </div>
+        <div class="score-breakdown">
+          <div class="score-breakdown-row">
+            <span class="score-small-label">${escapeHtml(t('stopPointsLabel'))}</span>
+            <span class="score-small-value">${escapeHtml(formatNumber(score.stopPoints))}</span>
+          </div>
+          <div class="score-breakdown-row">
+            <span class="score-small-label">${escapeHtml(t('linePointsLabel'))}</span>
+            <span class="score-small-value">${escapeHtml(formatNumber(score.linePoints))}</span>
+          </div>
+          <div class="score-breakdown-row">
+            <span class="score-small-label">${escapeHtml(t('routeBonusLabel'))}</span>
+            <span class="score-small-value">${escapeHtml(formatNumber(score.routeBonus))}</span>
+          </div>
+          <div class="score-breakdown-row">
+            <span class="score-small-label">${escapeHtml(t('goldBonusesLabel'))}</span>
+            <span class="score-small-value ${goldBonuses > 0 ? 'gold-positive' : ''}">${escapeHtml(formatNumber(goldBonuses))}</span>
+          </div>
+        </div>
+      </div>`;
+  }).join('') : `<div class="empty-state">${escapeHtml(t('noScoreboard'))}</div>`;
+
+  requestAnimationFrame(() => { el('scroll-scoreboard').scrollTop = scroll; });
+}
+
+// ============================================================================
+// Live state loading / seamless polling
+// ============================================================================
+function applyGameState(nextState) {
+  if (!nextState || nextState.error) {
+    throw new Error(nextState?.message || nextState?.error || t('invalidGameState'));
+  }
+
+  lastSuccessAt = new Date();
+  updateSyncStatus();
+
+  if (gameState?.revision === nextState.revision) return;
+
+  const previousState = gameState;
+  const teamsChanged = !sameJson(previousState?.teams, nextState.teams);
+  const ownersChanged =
+    teamsChanged ||
+    stopOwnersChanged(previousState?.stops, nextState.stops);
+  const tasksChanged = !sameJson(previousState?.tasks, nextState.tasks);
+  const puzzlesChanged = !sameJson(previousState?.puzzles, nextState.puzzles);
+  const routesChanged =
+    teamsChanged ||
+    !sameJson(previousState?.routeBonuses, nextState.routeBonuses);
+  const scoreboardChanged =
+    teamsChanged ||
+    !sameJson(previousState?.scoreboard, nextState.scoreboard);
+
+  const selectedStopChanged = uiState.selectedStopId
+    ? !sameJson(
+        previousState?.stops?.[uiState.selectedStopId],
+        nextState?.stops?.[uiState.selectedStopId]
+      )
+    : false;
+
+  gameState = nextState;
+  teamByName = new Map((gameState.teams || []).map(team => [team.name, team]));
+
+  // Only mutate sections whose data changed. A deposit that changes ticket
+  // totals but not ownership no longer causes all stop/edge Leaflet styles,
+  // puzzle markers, task cards, and route cards to be rebuilt.
+  if (ownersChanged) {
+    updateMapOwnershipState();
+  } else if (selectedStopChanged) {
+    renderStopDetail(uiState.selectedStopId);
+  }
+
+  if (puzzlesChanged) {
+    updatePuzzleMarkers();
+    if (uiState.selectedPuzzleId) renderPuzzleDetail(uiState.selectedPuzzleId);
+  }
+
+  if (tasksChanged || puzzlesChanged) renderActivities();
+  if (routesChanged) renderRoutes();
+  if (scoreboardChanged) renderScoreboard();
+}
+
+async function fetchJsonWithTimeout(url) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), CONFIG.FETCH_TIMEOUT_MS);
+  try {
+    const response = await fetch(url, {
+      cache: 'no-store',
+      redirect: 'follow',
+      signal: controller.signal,
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return await response.json();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function loadLiveState() {
+  const separator = CONFIG.API_URL.includes('?') ? '&' : '?';
+  const url = `${CONFIG.API_URL}${separator}_=${Date.now()}`;
+  return await fetchJsonWithTimeout(url);
+}
+
+async function pollLiveState() {
+  if (pollInFlight) return;
+  clearTimeout(pollTimer);
+
+  if (!isApiConfigured()) {
+    setSyncStatus('error', 'setApiUrl');
+    return;
+  }
+
+  pollInFlight = true;
+  try {
+    const next = await loadLiveState();
+    applyGameState(next);
+    pollErrorCount = 0;
+  } catch (error) {
+    console.error(error);
+    pollErrorCount += 1;
+    setSyncStatus('error', lastSuccessAt ? 'connectionIssue' : 'offline');
+  } finally {
+    pollInFlight = false;
+    const normal = document.hidden ? CONFIG.BACKGROUND_POLL_MS : CONFIG.POLL_MS;
+    const backoff = Math.min(60000, normal * Math.max(1, 2 ** Math.min(pollErrorCount, 3)));
+    pollTimer = setTimeout(pollLiveState, backoff);
+  }
+}
+
+function renderSyncStatus() {
+  const node = el('syncStatus');
+  node.classList.remove('live', 'error');
+  if (syncStatusState.kind) node.classList.add(syncStatusState.kind);
+  el('syncText').textContent = t(syncStatusState.key, syncStatusState.params);
+}
+
+function setSyncStatus(kind, key, params = {}) {
+  syncStatusState = { kind, key, params };
+  renderSyncStatus();
+}
+
+function updateSyncStatus() {
+  if (!lastSuccessAt) {
+    renderSyncStatus();
+    return;
+  }
+  const seconds = Math.floor((Date.now() - lastSuccessAt.getTime()) / 1000);
+  if (seconds < 15) setSyncStatus('live', 'live');
+  else if (seconds < 60) setSyncStatus('live', 'secondsAgo', { count: seconds });
+  else setSyncStatus('', 'minutesAgo', { count: Math.floor(seconds / 60) });
+}
+setInterval(updateSyncStatus, 5000);
+
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) {
+    clearTimeout(pollTimer);
+    pollTimer = setTimeout(pollLiveState, 50);
+  }
+});
+
+// ============================================================================
+// Startup
+// ============================================================================
+async function start() {
+  el('appTitle').textContent = CONFIG.APP_TITLE;
+  document.title = CONFIG.APP_TITLE;
+  applyStaticTranslations();
+  initMap();
+  updateZoomControlLanguage();
+
+  try {
+    await loadStaticNetwork();
+  } catch (error) {
+    console.error(error);
+    setSyncStatus('error', 'mapDataError');
+    showToast(error.message);
+  }
+
+  if (isApiConfigured()) {
+    pollLiveState();
+  } else {
+    setSyncStatus('error', 'setApiUrl');
+    renderActivities();
+    renderRoutes();
+    renderScoreboard();
+  }
+}
+
+start();
+</script>
+</body>
+</html>
