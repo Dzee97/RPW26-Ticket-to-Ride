@@ -485,7 +485,7 @@
       border: 0;
       border-radius: 7px;
       background: #eef2f4;
-      color: var(--text);
+      color: #33434e;
       font: inherit;
       font-size: 11px;
       font-weight: 800;
@@ -494,8 +494,12 @@
       cursor: pointer;
       transition: background .12s ease, transform .12s ease;
     }
-    button.mini-line:hover { background: #e0e7eb; }
+    button.mini-line:hover { background: #dfe7eb; }
     button.mini-line:active { transform: translateY(1px); }
+    button.mini-line:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
     .owner-status { padding: 9px 10px; border-radius: 11px; background: #f3f5f6; font-size: 12px; font-weight: 750; margin-bottom: 10px; }
     .deposit-list { display: grid; gap: 6px; }
     .deposit-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 0; border-bottom: 1px solid #eef1f3; font-size: 12px; }
@@ -550,18 +554,22 @@
 
     .puzzle-pin-wrap { background: none; border: 0; }
     .puzzle-pin {
-      width: 28px;
-      height: 28px;
+      width: var(--puzzle-size, 28px);
+      height: var(--puzzle-size, 28px);
       border-radius: 50% 50% 50% 8px;
       transform: rotate(-45deg);
       background: #7048a8;
       color: white;
-      border: 2px solid white;
+      border: var(--puzzle-border, 2px) solid white;
       box-shadow: 0 2px 8px rgba(0,0,0,.25);
       display: grid;
       place-items: center;
     }
-    .puzzle-pin span { transform: rotate(45deg); font-size: 14px; font-weight: 900; }
+    .puzzle-pin span {
+      transform: rotate(45deg);
+      font-size: var(--puzzle-font-size, 14px);
+      font-weight: 900;
+    }
     .puzzle-pin.selected { background: #2b1743; transform: rotate(-45deg) scale(1.18); }
 
     .leaflet-control-zoom { border: 0 !important; box-shadow: var(--shadow) !important; }
@@ -1149,10 +1157,10 @@ function initMap() {
   map.getPane('selectedRoutes').style.zIndex = 315;
   map.createPane('ownedEdges');
   map.getPane('ownedEdges').style.zIndex = 330;
-  map.createPane('puzzles');
-  map.getPane('puzzles').style.zIndex = 420;
   map.createPane('stops');
-  map.getPane('stops').style.zIndex = 430;
+  map.getPane('stops').style.zIndex = 410;
+  map.createPane('puzzles');
+  map.getPane('puzzles').style.zIndex = 430;
 
   map.setView([52.10, 4.50], 10);
   map.on('click', closeDetailSheet);
@@ -1359,16 +1367,14 @@ el('mapSelectionClose').addEventListener('click', event => {
 // ============================================================================
 // Dynamic map styling
 // ============================================================================
-
-// Leaflet CircleMarkers and DivIcons use screen pixels, so without explicit
-// scaling they remain equally large at every zoom level. Keep full marker size
-// when viewing a local area, but progressively shrink overview markers.
 function markerScaleForZoom() {
-  const zoom = map?.getZoom() ?? 12;
-  if (zoom <= 9) return .50;
-  if (zoom === 10) return .64;
-  if (zoom === 11) return .80;
-  return 1;
+  const zoom = map?.getZoom?.() ?? 14;
+
+  // Keep overview maps readable without hiding information completely.
+  // Scale smoothly from 48% at zoom <= 9 to 100% at zoom >= 14.
+  if (zoom <= 9) return .48;
+  if (zoom >= 14) return 1;
+  return .48 + ((zoom - 9) / 5) * .52;
 }
 
 function stopDynamicStyle(stopId) {
@@ -1393,53 +1399,53 @@ function updateStopMarkerStyles() {
   const selectedLineStops = uiState.selectedLineId
     ? lineStopIds(uiState.selectedLineId)
     : null;
-  const scale = markerScaleForZoom();
-  let selectedEntry = null;
+  const markerScale = markerScaleForZoom();
+
+  const claimedLayers = [];
+  let selectedLayer = null;
 
   for (const [stopId, entry] of stopLayersById) {
     const dynamic = stopDynamicStyle(stopId);
-    const isClaimed = Boolean(gameState?.stops?.[stopId]?.owner);
+    const liveStop = gameState?.stops?.[stopId];
+    const isClaimed = Boolean(liveStop?.owner && teamByName.has(liveStop.owner));
     const inSelectedLine = !selectedLineStops || selectedLineStops.has(stopId);
     const isSelectedStop = uiState.selectedStopId === stopId;
 
-    const normalRadius = 5.2 * scale;
-    const claimedRadius = Math.max(normalRadius * 1.18, normalRadius + .45);
-    const lineRadius = 6.6 * scale;
+    let radius = uiState.selectedLineId && inSelectedLine ? 6.6 : 5.2;
+
+    // Claimed stops are slightly easier to pick out at overview zoom levels.
+    if (isClaimed) radius *= 1.08;
+    radius *= markerScale;
+
+    // Keep a deliberately selected stop comfortably visible even when zoomed out.
+    if (isSelectedStop) radius = Math.max(6.5, 8.3 * markerScale);
 
     entry.layer.setStyle({
       ...dynamic,
-      radius: isSelectedStop
-        ? 8.3 * Math.max(scale, .82)
-        : (uiState.selectedLineId && inSelectedLine
-            ? Math.max(lineRadius, claimedRadius)
-            : (isClaimed ? claimedRadius : normalRadius)),
+      radius,
       opacity: isSelectedStop
         ? 1
-        : (uiState.selectedLineId && !inSelectedLine
-            ? .22
-            : (isClaimed ? 1 : (.72 + .28 * scale))),
+        : (uiState.selectedLineId && !inSelectedLine ? .22 : 1),
       fillOpacity: isSelectedStop
         ? 1
-        : (uiState.selectedLineId && !inSelectedLine
-            ? .16
-            : (isClaimed ? dynamic.fillOpacity : dynamic.fillOpacity * (.72 + .28 * scale))),
+        : (uiState.selectedLineId && !inSelectedLine ? .16 : dynamic.fillOpacity),
       weight: isSelectedStop
-        ? 3.2
-        : (uiState.selectedLineId && inSelectedLine
-            ? Math.max(1.35, 2.2 * scale)
-            : Math.max(1, 1.5 * scale)),
+        ? Math.max(2.6, 3.2 * markerScale)
+        : Math.max(1, (uiState.selectedLineId && inSelectedLine ? 2.2 : 1.5) * markerScale),
       color: isSelectedStop
         ? '#15242e'
         : (uiState.selectedLineId && inSelectedLine ? '#243845' : dynamic.color),
     });
 
-    // Claimed stops should win ordinary marker overlaps. The selected stop is
-    // brought forward once more after the loop so selection remains strongest.
-    if (isClaimed) entry.layer.bringToFront();
-    if (isSelectedStop) selectedEntry = entry;
+    if (isClaimed) claimedLayers.push(entry.layer);
+    if (isSelectedStop) selectedLayer = entry.layer;
   }
 
-  selectedEntry?.layer.bringToFront();
+  // Canvas draw order matters when nearby stops overlap. Bring claimed stops
+  // above unclaimed stops, then the selected stop above everything else in
+  // the stop pane. Puzzle markers live in a higher Leaflet pane.
+  for (const layer of claimedLayers) layer.bringToFront();
+  if (selectedLayer) selectedLayer.bringToFront();
 }
 
 function updateMapOwnershipState() {
@@ -1506,23 +1512,16 @@ function updatePuzzleMarkers() {
 }
 
 function puzzleIcon(selected) {
-  const scale = selected ? 1 : markerScaleForZoom();
-  const size = Math.max(15, Math.round(28 * scale));
-  const boxSize = size + 2;
-  const border = scale < .7 ? 1 : 2;
-  const fontSize = Math.max(9, Math.round(14 * scale));
+  const scale = markerScaleForZoom();
+  const size = Math.round(28 * scale);
+  const border = Math.max(1, Math.round(2 * scale));
+  const fontSize = Math.max(8, Math.round(14 * scale));
 
   return L.divIcon({
     className: 'puzzle-pin-wrap',
-    html: `<div
-      class="puzzle-pin ${selected ? 'selected' : ''}"
-      style="width:${size}px;height:${size}px;border-width:${border}px"
-    ><span style="font-size:${fontSize}px">?</span></div>`,
-    iconSize: [boxSize, boxSize],
-    iconAnchor: [
-      Math.round(size * .36),
-      Math.round(size * .93),
-    ],
+    html: `<div class="puzzle-pin ${selected ? 'selected' : ''}" style="--puzzle-size:${size}px;--puzzle-border:${border}px;--puzzle-font-size:${fontSize}px"><span>?</span></div>`,
+    iconSize: [size + 2, size + 2],
+    iconAnchor: [Math.round(size * .36), Math.round(size * .93)],
   });
 }
 
@@ -1567,8 +1566,6 @@ function renderStopDetail(stopId) {
   const p = feature.properties || {};
   const dynamic = gameState?.stops?.[stopId] || {};
 
-  // Use logical line IDs for interaction, while still displaying the familiar
-  // public line number. This also works if two logical lines share a line_ref.
   const stopLines = [...new Set((p.line_ids || []).map(String))]
     .map(lineId => lineMeta.find(line => line.lineId === lineId))
     .filter(Boolean)
@@ -1578,11 +1575,12 @@ function renderStopDetail(stopId) {
       naturalCompare(a.lineId, b.lineId)
     );
 
-  // Compatibility fallback for older web_network.geojson files without
-  // line_ids. These labels remain non-clickable because no exact logical line
-  // identity is available.
-  const fallbackLineRefs = [...new Set((p.line_refs || []).map(String))]
-    .sort(naturalCompare);
+  // Compatibility fallback for older network files that expose line_refs but
+  // not line_ids. These can still be displayed, but cannot be unambiguously
+  // selected if multiple logical lines share the same public number.
+  const fallbackLineRefs = stopLines.length
+    ? []
+    : [...new Set((p.line_refs || []).map(String))].sort(naturalCompare);
 
   let ownerText = t('unowned');
   let ownerStyle = '';
@@ -1609,12 +1607,14 @@ function renderStopDetail(stopId) {
     <div class="detail-title">${escapeHtml(p.stop_name || p.name || stopId)}</div>
     <div class="detail-lines">${
       stopLines.length
-        ? stopLines.map(line => `<button
-            type="button"
-            class="mini-line"
-            data-stop-line-id="${escapeHtml(line.lineId)}"
-            title="${escapeHtml(line.lineName)}"
-          >${escapeHtml(line.lineRef)}</button>`).join('')
+        ? stopLines.map(line => `
+            <button
+              type="button"
+              class="mini-line"
+              data-stop-line-id="${escapeHtml(line.lineId)}"
+              title="${escapeHtml(line.lineName)}"
+            >${escapeHtml(line.lineRef)}</button>
+          `).join('')
         : fallbackLineRefs.map(ref => `<span class="mini-line">${escapeHtml(ref)}</span>`).join('')
     }</div>
     <div class="owner-status" ${ownerStyle}>${escapeHtml(ownerText)} · ${escapeHtml(p.num_lines ?? 0)} ${escapeHtml(Number(p.num_lines) === 1 ? t('stopPoint') : t('stopPoints'))}</div>
@@ -1639,7 +1639,10 @@ function renderStopDetail(stopId) {
   `;
 
   el('detailContent').querySelectorAll('[data-stop-line-id]').forEach(button => {
-    button.addEventListener('click', () => selectLine(button.dataset.stopLineId));
+    button.addEventListener('click', event => {
+      event.stopPropagation();
+      selectLine(button.dataset.stopLineId);
+    });
   });
 
   const helpToggle = el('ownershipHelpToggle');
