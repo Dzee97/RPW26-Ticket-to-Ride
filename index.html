@@ -480,7 +480,22 @@
     .detail-close { position: absolute; top: 11px; right: 12px; width: 30px; height: 30px; border: 0; border-radius: 50%; background: #eef1f3; cursor: pointer; color: #4d5962; }
     .detail-title { padding-right: 34px; font-size: 18px; font-weight: 850; letter-spacing: -.02em; }
     .detail-lines { display: flex; flex-wrap: wrap; gap: 5px; margin: 9px 0 12px; }
-    .mini-line { padding: 4px 7px; border-radius: 7px; background: #eef2f4; font-size: 11px; font-weight: 800; }
+    .mini-line {
+      padding: 4px 7px;
+      border: 0;
+      border-radius: 7px;
+      background: #eef2f4;
+      color: var(--text);
+      font: inherit;
+      font-size: 11px;
+      font-weight: 800;
+    }
+    button.mini-line {
+      cursor: pointer;
+      transition: background .12s ease, transform .12s ease;
+    }
+    button.mini-line:hover { background: #e0e7eb; }
+    button.mini-line:active { transform: translateY(1px); }
     .owner-status { padding: 9px 10px; border-radius: 11px; background: #f3f5f6; font-size: 12px; font-weight: 750; margin-bottom: 10px; }
     .deposit-list { display: grid; gap: 6px; }
     .deposit-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 0; border-bottom: 1px solid #eef1f3; font-size: 12px; }
@@ -1134,13 +1149,17 @@ function initMap() {
   map.getPane('selectedRoutes').style.zIndex = 315;
   map.createPane('ownedEdges');
   map.getPane('ownedEdges').style.zIndex = 330;
-  map.createPane('stops');
-  map.getPane('stops').style.zIndex = 410;
   map.createPane('puzzles');
-  map.getPane('puzzles').style.zIndex = 430;
+  map.getPane('puzzles').style.zIndex = 420;
+  map.createPane('stops');
+  map.getPane('stops').style.zIndex = 430;
 
   map.setView([52.10, 4.50], 10);
   map.on('click', closeDetailSheet);
+  map.on('zoomend', () => {
+    updateStopMarkerStyles();
+    updatePuzzleSelection();
+  });
 }
 
 async function loadStaticNetwork() {
@@ -1340,6 +1359,18 @@ el('mapSelectionClose').addEventListener('click', event => {
 // ============================================================================
 // Dynamic map styling
 // ============================================================================
+
+// Leaflet CircleMarkers and DivIcons use screen pixels, so without explicit
+// scaling they remain equally large at every zoom level. Keep full marker size
+// when viewing a local area, but progressively shrink overview markers.
+function markerScaleForZoom() {
+  const zoom = map?.getZoom() ?? 12;
+  if (zoom <= 9) return .50;
+  if (zoom === 10) return .64;
+  if (zoom === 11) return .80;
+  return 1;
+}
+
 function stopDynamicStyle(stopId) {
   const dynamic = gameState?.stops?.[stopId];
   if (dynamic?.owner && teamByName.has(dynamic.owner)) {
@@ -1362,33 +1393,53 @@ function updateStopMarkerStyles() {
   const selectedLineStops = uiState.selectedLineId
     ? lineStopIds(uiState.selectedLineId)
     : null;
+  const scale = markerScaleForZoom();
+  let selectedEntry = null;
 
   for (const [stopId, entry] of stopLayersById) {
     const dynamic = stopDynamicStyle(stopId);
+    const isClaimed = Boolean(gameState?.stops?.[stopId]?.owner);
     const inSelectedLine = !selectedLineStops || selectedLineStops.has(stopId);
     const isSelectedStop = uiState.selectedStopId === stopId;
+
+    const normalRadius = 5.2 * scale;
+    const claimedRadius = Math.max(normalRadius * 1.18, normalRadius + .45);
+    const lineRadius = 6.6 * scale;
 
     entry.layer.setStyle({
       ...dynamic,
       radius: isSelectedStop
-        ? 8.3
-        : (uiState.selectedLineId && inSelectedLine ? 6.6 : 5.2),
+        ? 8.3 * Math.max(scale, .82)
+        : (uiState.selectedLineId && inSelectedLine
+            ? Math.max(lineRadius, claimedRadius)
+            : (isClaimed ? claimedRadius : normalRadius)),
       opacity: isSelectedStop
         ? 1
-        : (uiState.selectedLineId && !inSelectedLine ? .22 : 1),
+        : (uiState.selectedLineId && !inSelectedLine
+            ? .22
+            : (isClaimed ? 1 : (.72 + .28 * scale))),
       fillOpacity: isSelectedStop
         ? 1
-        : (uiState.selectedLineId && !inSelectedLine ? .16 : dynamic.fillOpacity),
+        : (uiState.selectedLineId && !inSelectedLine
+            ? .16
+            : (isClaimed ? dynamic.fillOpacity : dynamic.fillOpacity * (.72 + .28 * scale))),
       weight: isSelectedStop
         ? 3.2
-        : (uiState.selectedLineId && inSelectedLine ? 2.2 : 1.5),
+        : (uiState.selectedLineId && inSelectedLine
+            ? Math.max(1.35, 2.2 * scale)
+            : Math.max(1, 1.5 * scale)),
       color: isSelectedStop
         ? '#15242e'
         : (uiState.selectedLineId && inSelectedLine ? '#243845' : dynamic.color),
     });
 
-    if (isSelectedStop) entry.layer.bringToFront();
+    // Claimed stops should win ordinary marker overlaps. The selected stop is
+    // brought forward once more after the loop so selection remains strongest.
+    if (isClaimed) entry.layer.bringToFront();
+    if (isSelectedStop) selectedEntry = entry;
   }
+
+  selectedEntry?.layer.bringToFront();
 }
 
 function updateMapOwnershipState() {
@@ -1455,11 +1506,23 @@ function updatePuzzleMarkers() {
 }
 
 function puzzleIcon(selected) {
+  const scale = selected ? 1 : markerScaleForZoom();
+  const size = Math.max(15, Math.round(28 * scale));
+  const boxSize = size + 2;
+  const border = scale < .7 ? 1 : 2;
+  const fontSize = Math.max(9, Math.round(14 * scale));
+
   return L.divIcon({
     className: 'puzzle-pin-wrap',
-    html: `<div class="puzzle-pin ${selected ? 'selected' : ''}"><span>?</span></div>`,
-    iconSize: [30, 30],
-    iconAnchor: [10, 26],
+    html: `<div
+      class="puzzle-pin ${selected ? 'selected' : ''}"
+      style="width:${size}px;height:${size}px;border-width:${border}px"
+    ><span style="font-size:${fontSize}px">?</span></div>`,
+    iconSize: [boxSize, boxSize],
+    iconAnchor: [
+      Math.round(size * .36),
+      Math.round(size * .93),
+    ],
   });
 }
 
@@ -1503,7 +1566,23 @@ function renderStopDetail(stopId) {
   if (!feature) return;
   const p = feature.properties || {};
   const dynamic = gameState?.stops?.[stopId] || {};
-  const lines = [...new Set((p.line_refs || []).map(String))].sort(naturalCompare);
+
+  // Use logical line IDs for interaction, while still displaying the familiar
+  // public line number. This also works if two logical lines share a line_ref.
+  const stopLines = [...new Set((p.line_ids || []).map(String))]
+    .map(lineId => lineMeta.find(line => line.lineId === lineId))
+    .filter(Boolean)
+    .sort((a, b) =>
+      naturalCompare(a.lineRef, b.lineRef) ||
+      naturalCompare(a.lineName, b.lineName) ||
+      naturalCompare(a.lineId, b.lineId)
+    );
+
+  // Compatibility fallback for older web_network.geojson files without
+  // line_ids. These labels remain non-clickable because no exact logical line
+  // identity is available.
+  const fallbackLineRefs = [...new Set((p.line_refs || []).map(String))]
+    .sort(naturalCompare);
 
   let ownerText = t('unowned');
   let ownerStyle = '';
@@ -1528,7 +1607,16 @@ function renderStopDetail(stopId) {
 
   el('detailContent').innerHTML = `
     <div class="detail-title">${escapeHtml(p.stop_name || p.name || stopId)}</div>
-    <div class="detail-lines">${lines.map(ref => `<span class="mini-line">${escapeHtml(ref)}</span>`).join('')}</div>
+    <div class="detail-lines">${
+      stopLines.length
+        ? stopLines.map(line => `<button
+            type="button"
+            class="mini-line"
+            data-stop-line-id="${escapeHtml(line.lineId)}"
+            title="${escapeHtml(line.lineName)}"
+          >${escapeHtml(line.lineRef)}</button>`).join('')
+        : fallbackLineRefs.map(ref => `<span class="mini-line">${escapeHtml(ref)}</span>`).join('')
+    }</div>
     <div class="owner-status" ${ownerStyle}>${escapeHtml(ownerText)} · ${escapeHtml(p.num_lines ?? 0)} ${escapeHtml(Number(p.num_lines) === 1 ? t('stopPoint') : t('stopPoints'))}</div>
     <div class="deposit-list">${deposits || `<div class="card-meta">${escapeHtml(t('liveDepositsUnavailable'))}</div>`}</div>
     <div class="ownership-help">
@@ -1549,6 +1637,10 @@ function renderStopDetail(stopId) {
       >${escapeHtml(t('claimStopExplanation'))}</div>
     </div>
   `;
+
+  el('detailContent').querySelectorAll('[data-stop-line-id]').forEach(button => {
+    button.addEventListener('click', () => selectLine(button.dataset.stopLineId));
+  });
 
   const helpToggle = el('ownershipHelpToggle');
   const helpPanel = el('ownershipHelpPanel');
